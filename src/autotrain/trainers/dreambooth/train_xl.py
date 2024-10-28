@@ -63,6 +63,22 @@ from transformers import AutoTokenizer, PretrainedConfig
 
 from autotrain import logger
 
+class TrainingState:
+    def __init__(self):
+        self.current_step = 0
+        self.total_steps = 0
+        self.progress_percentage = 0
+        self.remaining_time = None
+        self.is_training = False
+        self.current_loss = 0.0
+
+    def update(self, current_step, total_steps, loss=None):
+        self.current_step = current_step
+        self.total_steps = total_steps
+        self.progress_percentage = (current_step / total_steps) * 100 if total_steps > 0 else 0
+        if loss is not None:
+            self.current_loss = loss
+
 
 def determine_scheduler_type(pretrained_model_name_or_path, revision):
     model_index_filename = "model_index.json"
@@ -365,7 +381,12 @@ def encode_prompt(text_encoders, tokenizers, prompt, text_input_ids_list=None):
     return prompt_embeds, pooled_prompt_embeds
 
 
-def main(args):
+def main(args, training_state=None):
+    # Add training state initialization
+    if training_state is None:
+        training_state = TrainingState()
+    training_state.is_training = True
+
     if args.report_to == "wandb" and args.hub_token is not None:
         raise ValueError(
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
@@ -940,6 +961,10 @@ def main(args):
     global_step = 0
     first_epoch = 0
 
+    # Update total steps in training state
+    if training_state:
+        training_state.total_steps = args.max_train_steps
+
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
@@ -1207,6 +1232,14 @@ def main(args):
                 progress_bar.update(1)
                 global_step += 1
 
+                # Update training state
+                if training_state:
+                    training_state.update(
+                        current_step=global_step,
+                        total_steps=args.max_train_steps,
+                        loss=loss.detach().item()
+                    )
+
                 if accelerator.is_main_process:
                     if global_step % args.checkpointing_steps == 0:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
@@ -1302,5 +1335,9 @@ def main(args):
             text_encoder_lora_layers=text_encoder_lora_layers,
             text_encoder_2_lora_layers=text_encoder_2_lora_layers,
         )
+
+    # Set training complete
+    if training_state:
+        training_state.is_training = False
 
     accelerator.end_training()
