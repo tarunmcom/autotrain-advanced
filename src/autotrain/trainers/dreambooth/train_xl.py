@@ -13,7 +13,6 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-
 import contextlib
 import gc
 import itertools
@@ -387,6 +386,11 @@ def main(args, training_state=None):
         training_state = TrainingState()
     training_state.is_training = True
 
+    # Disable all logging except errors
+    logging.getLogger("diffusers").setLevel(logging.ERROR)
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger().setLevel(logging.ERROR)
+
     if args.report_to == "wandb" and args.hub_token is not None:
         raise ValueError(
             "You cannot use both --report_to=wandb and --hub_token due to a security risk of exposing your token."
@@ -462,7 +466,7 @@ def main(args, training_state=None):
             pipeline.to(accelerator.device)
 
             for example in tqdm(
-                sample_dataloader, desc="Generating class images", disable=not accelerator.is_local_main_process
+                sample_dataloader, desc="Generating class images", disable=True
             ):
                 images = pipeline(example["prompt"]).images
 
@@ -993,13 +997,8 @@ def main(args, training_state=None):
     else:
         initial_global_step = 0
 
-    progress_bar = tqdm(
-        range(0, args.max_train_steps),
-        initial=initial_global_step,
-        desc="Steps",
-        # Only show the progress bar once on each machine.
-        disable=not accelerator.is_local_main_process,
-    )
+    # Replace the progress bar creation with a dummy progress bar
+    progress_bar = range(0, args.max_train_steps)
 
     def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
         sigmas = noise_scheduler.sigmas.to(device=accelerator.device, dtype=dtype)
@@ -1229,7 +1228,6 @@ def main(args, training_state=None):
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
-                progress_bar.update(1)
                 global_step += 1
 
                 # Update training state
@@ -1265,10 +1263,6 @@ def main(args, training_state=None):
                         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
-
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
-            progress_bar.set_postfix(**logs)
-            accelerator.log(logs, step=global_step)
 
             if global_step >= args.max_train_steps:
                 break
