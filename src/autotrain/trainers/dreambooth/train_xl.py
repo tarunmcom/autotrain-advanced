@@ -380,7 +380,7 @@ def encode_prompt(text_encoders, tokenizers, prompt, text_input_ids_list=None):
     return prompt_embeds, pooled_prompt_embeds
 
 
-def main(args, training_state=None):
+def main(args, training_state=None, callback=None):
     # Add training state initialization
     if training_state is None:
         training_state = TrainingState()
@@ -1014,6 +1014,8 @@ def main(args, training_state=None):
 
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
+        if callback:
+            callback(training_state)
         if args.train_text_encoder:
             text_encoder_one.train()
             text_encoder_two.train()
